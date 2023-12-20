@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	lokilog "github.com/grafana/loki/pkg/logql/log"
+
 	"github.com/cespare/xxhash/v2"
 	"github.com/grafana/dskit/user"
 	"github.com/prometheus/common/model"
@@ -25,7 +27,9 @@ import (
 	"github.com/grafana/loki/pkg/iter"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/grafana/loki/pkg/logql"
+	"github.com/grafana/loki/pkg/logql/syntax"
 	"github.com/grafana/loki/pkg/querier/astmapper"
+	"github.com/grafana/loki/pkg/querier/plan"
 	"github.com/grafana/loki/pkg/storage/chunk"
 	"github.com/grafana/loki/pkg/storage/chunk/client/local"
 	"github.com/grafana/loki/pkg/storage/config"
@@ -494,6 +498,10 @@ func Test_store_SelectLogs(t *testing.T) {
 				chunkMetrics: NilMetrics,
 			}
 
+			tt.req.Plan = &plan.QueryPlan{
+				AST: syntax.MustParseExpr(tt.req.Selector),
+			}
+
 			ctx = user.InjectOrgID(context.Background(), "test-user")
 			it, err := s.SelectLogs(ctx, logql.SelectLogParams{QueryRequest: tt.req})
 			if err != nil {
@@ -818,6 +826,10 @@ func Test_store_SelectSample(t *testing.T) {
 				chunkMetrics: NilMetrics,
 			}
 
+			tt.req.Plan = &plan.QueryPlan{
+				AST: syntax.MustParseExpr(tt.req.Selector),
+			}
+
 			ctx = user.InjectOrgID(context.Background(), "test-user")
 			it, err := s.SelectSamples(ctx, logql.SelectSampleParams{SampleQueryRequest: tt.req})
 			if err != nil {
@@ -862,8 +874,9 @@ func Test_ChunkFilterer(t *testing.T) {
 	}
 	defer it.Close()
 	for it.Next() {
-		v := mustParseLabels(it.Labels())["foo"]
-		require.NotEqual(t, "bazz", v)
+		l, err := syntax.ParseLabels(it.Labels())
+		require.NoError(t, err)
+		require.NotEqual(t, "bazz", l.Get("foo"))
 	}
 
 	logit, err := s.SelectLogs(ctx, logql.SelectLogParams{QueryRequest: newQuery("{foo=~\"ba.*\"}", from, from.Add(1*time.Hour), nil, nil)})
@@ -873,15 +886,177 @@ func Test_ChunkFilterer(t *testing.T) {
 	}
 	defer logit.Close()
 	for logit.Next() {
-		v := mustParseLabels(it.Labels())["foo"]
-		require.NotEqual(t, "bazz", v)
+		l, err := syntax.ParseLabels(it.Labels())
+		require.NoError(t, err)
+		require.NotEqual(t, "bazz", l.Get("foo"))
 	}
 	ids, err := s.SelectSeries(ctx, logql.SelectLogParams{QueryRequest: newQuery("{foo=~\"ba.*\"}", from, from.Add(1*time.Hour), nil, nil)})
 	require.NoError(t, err)
 	for _, id := range ids {
-		v := id.Labels["foo"]
-		require.NotEqual(t, "bazz", v)
+		require.NotEqual(t, "bazz", id.Get("foo"))
 	}
+}
+
+func Test_PipelineWrapper(t *testing.T) {
+	s := &LokiStore{
+		Store: storeFixture,
+		cfg: Config{
+			MaxChunkBatchSize: 10,
+		},
+		chunkMetrics: NilMetrics,
+	}
+	wrapper := &testPipelineWrapper{
+		pipeline: newMockPipeline(),
+	}
+
+	s.SetPipelineWrapper(wrapper)
+	ctx = user.InjectOrgID(context.Background(), "test-user")
+	logit, err := s.SelectLogs(ctx, logql.SelectLogParams{QueryRequest: newQuery("{foo=~\"ba.*\"}", from, from.Add(1*time.Hour), nil, nil)})
+	if err != nil {
+		t.Errorf("store.SelectLogs() error = %v", err)
+		return
+	}
+	defer logit.Close()
+	for logit.Next() {
+		require.NoError(t, logit.Error()) // consume the iterator
+	}
+
+	require.Equal(t, "test-user", wrapper.tenant)
+	require.Equal(t, "{foo=~\"ba.*\"}", wrapper.query)
+	require.Equal(t, 28, wrapper.pipeline.sp.called) // we've passed every log line through the wrapper
+}
+
+type testPipelineWrapper struct {
+	query    string
+	pipeline *mockPipeline
+	tenant   string
+}
+
+func (t *testPipelineWrapper) Wrap(_ context.Context, pipeline lokilog.Pipeline, query, tenant string) lokilog.Pipeline {
+	t.tenant = tenant
+	t.query = query
+	t.pipeline.wrappedExtractor = pipeline
+	return t.pipeline
+}
+
+func newMockPipeline() *mockPipeline {
+	return &mockPipeline{
+		sp: &mockStreamPipeline{},
+	}
+}
+
+type mockPipeline struct {
+	wrappedExtractor lokilog.Pipeline
+	sp               *mockStreamPipeline
+}
+
+func (p *mockPipeline) ForStream(l labels.Labels) lokilog.StreamPipeline {
+	sp := p.wrappedExtractor.ForStream(l)
+	p.sp.wrappedSP = sp
+	return p.sp
+}
+
+func (p *mockPipeline) Reset() {}
+
+// A stub always returns the same data
+type mockStreamPipeline struct {
+	wrappedSP lokilog.StreamPipeline
+	called    int
+}
+
+func (p *mockStreamPipeline) BaseLabels() lokilog.LabelsResult {
+	return p.wrappedSP.BaseLabels()
+}
+
+func (p *mockStreamPipeline) Process(ts int64, line []byte, lbs ...labels.Label) ([]byte, lokilog.LabelsResult, bool) {
+	p.called++
+	return p.wrappedSP.Process(ts, line, lbs...)
+}
+
+func (p *mockStreamPipeline) ProcessString(ts int64, line string, lbs ...labels.Label) (string, lokilog.LabelsResult, bool) {
+	p.called++
+	return p.wrappedSP.ProcessString(ts, line, lbs...)
+}
+
+func Test_SampleWrapper(t *testing.T) {
+	s := &LokiStore{
+		Store: storeFixture,
+		cfg: Config{
+			MaxChunkBatchSize: 10,
+		},
+		chunkMetrics: NilMetrics,
+	}
+	wrapper := &testExtractorWrapper{
+		extractor: newMockExtractor(),
+	}
+	s.SetExtractorWrapper(wrapper)
+
+	ctx = user.InjectOrgID(context.Background(), "test-user")
+	it, err := s.SelectSamples(ctx, logql.SelectSampleParams{SampleQueryRequest: newSampleQuery("count_over_time({foo=~\"ba.*\"}[1s])", from, from.Add(1*time.Hour), nil)})
+	if err != nil {
+		t.Errorf("store.SelectSamples() error = %v", err)
+		return
+	}
+	defer it.Close()
+	for it.Next() {
+		require.NoError(t, it.Error()) // consume the iterator
+	}
+
+	require.Equal(t, "test-user", wrapper.tenant)
+	require.Equal(t, "count_over_time({foo=~\"ba.*\"}[1s])", wrapper.query)
+	require.Equal(t, 28, wrapper.extractor.sp.called) // we've passed every log line through the wrapper
+}
+
+type testExtractorWrapper struct {
+	query     string
+	tenant    string
+	extractor *mockExtractor
+}
+
+func (t *testExtractorWrapper) Wrap(_ context.Context, extractor lokilog.SampleExtractor, query, tenant string) lokilog.SampleExtractor {
+	t.tenant = tenant
+	t.query = query
+	t.extractor.wrappedExtractor = extractor
+	return t.extractor
+}
+
+func newMockExtractor() *mockExtractor {
+	return &mockExtractor{
+		sp: &mockStreamExtractor{},
+	}
+}
+
+type mockExtractor struct {
+	wrappedExtractor lokilog.SampleExtractor
+	sp               *mockStreamExtractor
+}
+
+func (p *mockExtractor) ForStream(l labels.Labels) lokilog.StreamSampleExtractor {
+	sp := p.wrappedExtractor.ForStream(l)
+	p.sp.wrappedSP = sp
+	return p.sp
+}
+
+func (p *mockExtractor) Reset() {}
+
+// A stub always returns the same data
+type mockStreamExtractor struct {
+	wrappedSP lokilog.StreamSampleExtractor
+	called    int
+}
+
+func (p *mockStreamExtractor) BaseLabels() lokilog.LabelsResult {
+	return p.wrappedSP.BaseLabels()
+}
+
+func (p *mockStreamExtractor) Process(ts int64, line []byte, lbs ...labels.Label) (float64, lokilog.LabelsResult, bool) {
+	p.called++
+	return p.wrappedSP.Process(ts, line, lbs...)
+}
+
+func (p *mockStreamExtractor) ProcessString(ts int64, line string, lbs ...labels.Label) (float64, lokilog.LabelsResult, bool) {
+	p.called++
+	return p.wrappedSP.ProcessString(ts, line, lbs...)
 }
 
 func Test_store_GetSeries(t *testing.T) {
@@ -1307,13 +1482,17 @@ func TestStore_MultiPeriod(t *testing.T) {
 
 }
 
-func mustParseLabels(s string) map[string]string {
+func mustParseLabels(s string) []logproto.SeriesIdentifier_LabelsEntry {
 	l, err := marshal.NewLabelSet(s)
 	if err != nil {
 		log.Fatalf("Failed to parse %s", s)
 	}
 
-	return l
+	result := make([]logproto.SeriesIdentifier_LabelsEntry, 0, len(l))
+	for k, v := range l {
+		result = append(result, logproto.SeriesIdentifier_LabelsEntry{Key: k, Value: v})
+	}
+	return result
 }
 
 func parseDate(in string) time.Time {
@@ -1385,6 +1564,9 @@ func Test_OverlappingChunks(t *testing.T) {
 		Direction: logproto.BACKWARD,
 		Start:     time.Unix(0, 0),
 		End:       time.Unix(0, 10),
+		Plan: &plan.QueryPlan{
+			AST: syntax.MustParseExpr(`{foo="bar"}`),
+		},
 	}})
 	if err != nil {
 		t.Errorf("store.SelectLogs() error = %v", err)
@@ -1441,13 +1623,16 @@ func Test_GetSeries(t *testing.T) {
 		ctx            = user.InjectOrgID(context.Background(), "test-user")
 		expectedSeries = []logproto.SeriesIdentifier{
 			{
-				Labels: map[string]string{"bar": "foo"},
+				Labels: logproto.MustNewSeriesEntries("bar", "foo"),
 			},
 			{
-				Labels: map[string]string{"foo": "bar", "buzz": "boo"},
+				Labels: logproto.MustNewSeriesEntries(
+					"buzz", "boo",
+					"foo", "bar",
+				),
 			},
 			{
-				Labels: map[string]string{"foo": "buzz"},
+				Labels: logproto.MustNewSeriesEntries("foo", "buzz"),
 			},
 		}
 	)
@@ -1479,7 +1664,10 @@ func Test_GetSeries(t *testing.T) {
 			},
 			[]logproto.SeriesIdentifier{
 				{
-					Labels: map[string]string{"foo": "bar", "buzz": "boo"},
+					Labels: logproto.MustNewSeriesEntries(
+						"buzz", "boo",
+						"foo", "bar",
+					),
 				},
 			},
 		},
@@ -1497,6 +1685,15 @@ func Test_GetSeries(t *testing.T) {
 	} {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
+			if tt.req.Selector != "" {
+				tt.req.Plan = &plan.QueryPlan{
+					AST: syntax.MustParseExpr(tt.req.Selector),
+				}
+			} else {
+				tt.req.Plan = &plan.QueryPlan{
+					AST: nil,
+				}
+			}
 			series, err := store.SelectSeries(ctx, tt.req)
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedSeries, series)

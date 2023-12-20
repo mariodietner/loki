@@ -7,11 +7,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/grafana/dskit/user"
-
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/dskit/httpgrpc"
+	"github.com/grafana/dskit/user"
 	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/model"
@@ -24,6 +23,7 @@ import (
 	base "github.com/grafana/loki/pkg/querier/queryrange/queryrangebase"
 	"github.com/grafana/loki/pkg/storage/chunk/cache"
 	"github.com/grafana/loki/pkg/storage/config"
+	"github.com/grafana/loki/pkg/util"
 	"github.com/grafana/loki/pkg/util/constants"
 	logutil "github.com/grafana/loki/pkg/util/log"
 )
@@ -242,15 +242,25 @@ func (r roundTripper) Do(ctx context.Context, req base.Request) (base.Response, 
 
 	switch op := req.(type) {
 	case *LokiRequest:
-		expr, err := syntax.ParseExpr(op.Query)
-		if err != nil {
-			return nil, httpgrpc.Errorf(http.StatusBadRequest, err.Error())
+		queryHash := util.HashedQuery(op.Query)
+		level.Info(logger).Log(
+			"msg", "executing query",
+			"type", "range",
+			"query", op.Query,
+			"start", op.StartTs.Format(time.RFC3339Nano),
+			"end", op.EndTs.Format(time.RFC3339Nano),
+			"start_delta", time.Since(op.StartTs),
+			"end_delta", time.Since(op.EndTs),
+			"length", op.EndTs.Sub(op.StartTs),
+			"step", op.Step,
+			"query_hash", queryHash,
+		)
+
+		if op.Plan == nil {
+			return nil, errors.New("query plan is empty")
 		}
 
-		queryHash := logql.HashedQuery(op.Query)
-		level.Info(logger).Log("msg", "executing query", "type", "range", "query", op.Query, "length", op.EndTs.Sub(op.StartTs), "step", op.Step, "query_hash", queryHash)
-
-		switch e := expr.(type) {
+		switch e := op.Plan.AST.(type) {
 		case syntax.SampleExpr:
 			// The error will be handled later.
 			groups, err := e.MatcherGroups()
@@ -291,15 +301,10 @@ func (r roundTripper) Do(ctx context.Context, req base.Request) (base.Response, 
 
 		return r.labels.Do(ctx, req)
 	case *LokiInstantRequest:
-		expr, err := syntax.ParseExpr(op.Query)
-		if err != nil {
-			return nil, httpgrpc.Errorf(http.StatusBadRequest, err.Error())
-		}
-
-		queryHash := logql.HashedQuery(op.Query)
+		queryHash := util.HashedQuery(op.Query)
 		level.Info(logger).Log("msg", "executing query", "type", "instant", "query", op.Query, "query_hash", queryHash)
 
-		switch expr.(type) {
+		switch op.Plan.AST.(type) {
 		case syntax.SampleExpr:
 			return r.instantMetric.Do(ctx, req)
 		default:
@@ -429,6 +434,7 @@ func NewLogFilterTripperware(
 					limits,
 					0, // 0 is unlimited shards
 					statsHandler,
+					cfg.ShardAggregations,
 				),
 			)
 		} else {
@@ -446,10 +452,7 @@ func NewLogFilterTripperware(
 			)
 		}
 
-		if len(queryRangeMiddleware) > 0 {
-			return NewLimitedRoundTripper(next, limits, schema.Configs, queryRangeMiddleware...)
-		}
-		return next
+		return NewLimitedRoundTripper(next, limits, schema.Configs, queryRangeMiddleware...)
 	}), nil
 }
 
@@ -529,10 +532,7 @@ func NewSeriesTripperware(
 	}
 
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
-		if len(queryRangeMiddleware) > 0 {
-			return NewLimitedRoundTripper(next, limits, schema.Configs, queryRangeMiddleware...)
-		}
-		return next
+		return NewLimitedRoundTripper(next, limits, schema.Configs, queryRangeMiddleware...)
 	}), nil
 }
 
@@ -563,11 +563,8 @@ func NewLabelsTripperware(
 	}
 
 	return base.MiddlewareFunc(func(next base.Handler) base.Handler {
-		if len(queryRangeMiddleware) > 0 {
-			// Do not forward any request header.
-			return base.MergeMiddlewares(queryRangeMiddleware...).Wrap(next)
-		}
-		return next
+		// Do not forward any request header.
+		return base.MergeMiddlewares(queryRangeMiddleware...).Wrap(next)
 	}), nil
 }
 
@@ -662,6 +659,7 @@ func NewMetricTripperware(
 					limits,
 					0, // 0 is unlimited shards
 					statsHandler,
+					cfg.ShardAggregations,
 				),
 			)
 		} else {
@@ -726,6 +724,7 @@ func NewInstantMetricTripperware(
 					limits,
 					0, // 0 is unlimited shards
 					statsHandler,
+					cfg.ShardAggregations,
 				),
 			)
 		}

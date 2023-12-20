@@ -31,7 +31,14 @@ func TestTailHandler(t *testing.T) {
 
 	api := NewQuerierAPI(mockQuerierConfig(), nil, limits, log.NewNopLogger())
 
-	req, err := http.NewRequest("GET", "/", nil)
+	req, err := http.NewRequest("GET", `/`, nil)
+	require.NoError(t, err)
+	q := req.URL.Query()
+	q.Add("query", `{app="loki"}`)
+	req.URL.RawQuery = q.Encode()
+	err = req.ParseForm()
+	require.NoError(t, err)
+
 	ctx := user.InjectOrgID(req.Context(), "1|2")
 	req = req.WithContext(ctx)
 	require.NoError(t, err)
@@ -156,15 +163,15 @@ func TestSeriesHandler(t *testing.T) {
 			return &logproto.SeriesResponse{
 				Series: []logproto.SeriesIdentifier{
 					{
-						Labels: map[string]string{
-							"a": "1",
-							"b": "2",
+						Labels: []logproto.SeriesIdentifier_LabelsEntry{
+							{Key: "a", Value: "1"},
+							{Key: "b", Value: "2"},
 						},
 					},
 					{
-						Labels: map[string]string{
-							"c": "3",
-							"d": "4",
+						Labels: []logproto.SeriesIdentifier_LabelsEntry{
+							{Key: "c", Value: "3"},
+							{Key: "d", Value: "4"},
 						},
 					},
 				},

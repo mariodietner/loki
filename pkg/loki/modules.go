@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -318,6 +319,7 @@ func (t *Loki) initDistributor() (services.Service, error) {
 		t.Overrides,
 		prometheus.DefaultRegisterer,
 		t.Cfg.MetricsNamespace,
+		t.Tee,
 		logger,
 	)
 	if err != nil {
@@ -519,6 +521,7 @@ func (t *Loki) initQuerier() (services.Service, error) {
 	internalMiddlewares := []queryrangebase.Middleware{
 		serverutil.RecoveryMiddleware,
 		queryrange.Instrument{Metrics: t.Metrics},
+		queryrange.Tracer{},
 	}
 	if t.supportIndexDeleteRequest() && t.Cfg.CompactorConfig.RetentionEnabled {
 		internalMiddlewares = append(
@@ -529,6 +532,7 @@ func (t *Loki) initQuerier() (services.Service, error) {
 	internalHandler := queryrangebase.MergeMiddlewares(internalMiddlewares...).Wrap(handler)
 
 	svc, err := querier.InitWorkerService(
+		logger,
 		querierWorkerServiceConfig,
 		prometheus.DefaultRegisterer,
 		internalHandler,
@@ -577,7 +581,7 @@ func (t *Loki) initIngester() (_ services.Service, err error) {
 	t.Server.HTTP.Methods("POST", "GET", "DELETE").Path("/ingester/prepare_shutdown").Handler(
 		httpMiddleware.Wrap(http.HandlerFunc(t.Ingester.PrepareShutdown)),
 	)
-	t.Server.HTTP.Methods("POST").Path("/ingester/shutdown").Handler(
+	t.Server.HTTP.Methods("POST", "GET").Path("/ingester/shutdown").Handler(
 		httpMiddleware.Wrap(http.HandlerFunc(t.Ingester.ShutdownHandler)),
 	)
 	return t.Ingester, nil
@@ -800,7 +804,9 @@ func (t *Loki) initIngesterQuerier() (_ services.Service, err error) {
 // Placeholder limits type to pass to cortex frontend
 type disabledShuffleShardingLimits struct{}
 
-func (disabledShuffleShardingLimits) MaxQueriersPerUser(_ string) int { return 0 }
+func (disabledShuffleShardingLimits) MaxQueriersPerUser(_ string) uint { return 0 }
+
+func (disabledShuffleShardingLimits) MaxQueryCapacity(_ string) float64 { return 0 }
 
 func (t *Loki) initQueryFrontendMiddleware() (_ services.Service, err error) {
 	level.Debug(util_log.Logger).Log("msg", "initializing query frontend tripperware")
@@ -863,7 +869,7 @@ func (t *Loki) compactorAddress() (string, bool, error) {
 	legacyReadMode := t.Cfg.LegacyReadTarget && t.Cfg.isModuleEnabled(Read)
 	if t.Cfg.isModuleEnabled(All) || legacyReadMode || t.Cfg.isModuleEnabled(Backend) {
 		// In single binary or read modes, this module depends on Server
-		return fmt.Sprintf("%s:%d", t.Cfg.Server.GRPCListenAddress, t.Cfg.Server.GRPCListenPort), true, nil
+		return net.JoinHostPort(t.Cfg.Server.GRPCListenAddress, strconv.Itoa(t.Cfg.Server.GRPCListenPort)), true, nil
 	}
 
 	if t.Cfg.Common.CompactorAddress == "" && t.Cfg.Common.CompactorGRPCAddress == "" {
@@ -1262,7 +1268,7 @@ func (t *Loki) initBloomGateway() (services.Service, error) {
 
 	shuffleSharding := bloomgateway.NewShuffleShardingStrategy(t.bloomGatewayRingManager.Ring, t.bloomGatewayRingManager.RingLifecycler, t.Overrides, logger)
 
-	gateway, err := bloomgateway.New(t.Cfg.BloomGateway, t.Cfg.SchemaConfig, t.Cfg.StorageConfig, shuffleSharding, t.clientMetrics, logger, prometheus.DefaultRegisterer)
+	gateway, err := bloomgateway.New(t.Cfg.BloomGateway, t.Cfg.SchemaConfig, t.Cfg.StorageConfig, t.Overrides, shuffleSharding, t.clientMetrics, logger, prometheus.DefaultRegisterer)
 	if err != nil {
 		return nil, err
 	}
@@ -1331,7 +1337,15 @@ func (t *Loki) initIndexGateway() (services.Service, error) {
 
 	var bloomQuerier indexgateway.BloomQuerier
 	if t.Cfg.BloomGateway.Enabled {
-		bloomGatewayClient, err := bloomgateway.NewGatewayClient(t.Cfg.BloomGateway.Client, t.Overrides, prometheus.DefaultRegisterer, logger, t.Cfg.MetricsNamespace)
+		bloomGatewayClient, err := bloomgateway.NewGatewayClient(
+			t.Cfg.BloomGateway.Client,
+			t.Overrides,
+			prometheus.DefaultRegisterer,
+			logger,
+			t.Cfg.MetricsNamespace,
+			t.cacheGenerationLoader,
+			t.Cfg.CompactorConfig.RetentionEnabled,
+		)
 		if err != nil {
 			return nil, err
 		}
