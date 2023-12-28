@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/grafana/dskit/concurrency"
 	"github.com/prometheus/common/model"
 
-	"github.com/grafana/dskit/concurrency"
-
 	"github.com/grafana/loki/pkg/storage"
+	v1 "github.com/grafana/loki/pkg/storage/bloom/v1"
 	"github.com/grafana/loki/pkg/storage/chunk/client"
 	"github.com/grafana/loki/pkg/storage/config"
 	"github.com/grafana/loki/pkg/util/math"
@@ -35,6 +35,16 @@ type Ref struct {
 	MinFingerprint, MaxFingerprint uint64
 	StartTimestamp, EndTimestamp   int64
 	Checksum                       uint32
+}
+
+// Cmp returns the fingerprint's position relative to the bounds
+func (b Ref) Cmp(fp uint64) v1.BoundsCheck {
+	if fp < b.MinFingerprint {
+		return v1.Before
+	} else if fp > b.MaxFingerprint {
+		return v1.After
+	}
+	return v1.Overlap
 }
 
 type BlockRef struct {
@@ -72,14 +82,18 @@ type MetaClient interface {
 	DeleteMeta(ctx context.Context, meta Meta) error
 }
 
-type Block struct {
+type LazyBlock struct {
 	BlockRef
-
 	Data io.ReadCloser
 }
 
+type Block struct {
+	BlockRef
+	Data io.ReadSeekCloser
+}
+
 type BlockClient interface {
-	GetBlocks(ctx context.Context, references []BlockRef) (chan Block, chan error)
+	GetBlock(ctx context.Context, reference BlockRef) (LazyBlock, error)
 	PutBlocks(ctx context.Context, blocks []Block) ([]Block, error)
 	DeleteBlocks(ctx context.Context, blocks []BlockRef) error
 }
@@ -181,51 +195,33 @@ func findPeriod(configs []config.PeriodConfig, timestamp int64) (config.DayTime,
 	}
 	return config.DayTime{}, fmt.Errorf("can not find period for timestamp %d", timestamp)
 }
+
 func (b *BloomClient) DeleteMeta(ctx context.Context, meta Meta) error {
 	periodFrom, err := findPeriod(b.periodicConfigs, meta.StartTimestamp)
 	if err != nil {
-		return fmt.Errorf("error updloading meta file: %w", err)
+		return err
 	}
 	key := createMetaObjectKey(meta.MetaRef.Ref)
 	return b.periodicObjectClients[periodFrom].DeleteObject(ctx, key)
 }
 
-// GetBlocks downloads all the blocks from objectStorage in parallel and sends the downloaded blocks
-// via the channel Block that is closed only if all the blocks are downloaded without errors.
-// If an error happens, the error will be sent via error channel.
-func (b *BloomClient) GetBlocks(ctx context.Context, references []BlockRef) (chan Block, chan error) {
-	blocksChannel := make(chan Block, len(references))
-	errChannel := make(chan error)
-	go func() {
-		//todo move concurrency to the config
-		err := concurrency.ForEachJob(ctx, len(references), 100, func(ctx context.Context, idx int) error {
-			reference := references[idx]
-			period, err := findPeriod(b.periodicConfigs, reference.StartTimestamp)
-			if err != nil {
-				return fmt.Errorf("error while period lookup: %w", err)
-			}
-			objectClient := b.periodicObjectClients[period]
-			readCloser, _, err := objectClient.GetObject(ctx, createBlockObjectKey(reference.Ref))
-			if err != nil {
-				return fmt.Errorf("error while fetching object from storage: %w", err)
-			}
-			blocksChannel <- Block{
-				BlockRef: reference,
-				Data:     readCloser,
-			}
-			return nil
-		})
-		if err != nil {
-			errChannel <- fmt.Errorf("error downloading block file: %w", err)
-			return
-		}
-		//close blocks channel only if there is no error
-		close(blocksChannel)
-	}()
-	return blocksChannel, errChannel
+// GetBlock downloads the blocks from objectStorage and returns the downloaded block
+func (b *BloomClient) GetBlock(ctx context.Context, reference BlockRef) (LazyBlock, error) {
+	period, err := findPeriod(b.periodicConfigs, reference.StartTimestamp)
+	if err != nil {
+		return LazyBlock{}, fmt.Errorf("error while period lookup: %w", err)
+	}
+	objectClient := b.periodicObjectClients[period]
+	readCloser, _, err := objectClient.GetObject(ctx, createBlockObjectKey(reference.Ref))
+	if err != nil {
+		return LazyBlock{}, fmt.Errorf("error while fetching object from storage: %w", err)
+	}
+	return LazyBlock{
+		BlockRef: reference,
+		Data:     readCloser,
+	}, nil
 }
 
-// TODO zip (archive) blocks before uploading to storage
 func (b *BloomClient) PutBlocks(ctx context.Context, blocks []Block) ([]Block, error) {
 	results := make([]Block, len(blocks))
 	//todo move concurrency to the config
@@ -237,17 +233,13 @@ func (b *BloomClient) PutBlocks(ctx context.Context, blocks []Block) ([]Block, e
 
 		period, err := findPeriod(b.periodicConfigs, block.StartTimestamp)
 		if err != nil {
-			return fmt.Errorf("error updloading block file: %w", err)
+			return fmt.Errorf("error uploading block file: %w", err)
 		}
 		key := createBlockObjectKey(block.Ref)
 		objectClient := b.periodicObjectClients[period]
-		data, err := io.ReadAll(block.Data)
+		err = objectClient.PutObject(ctx, key, block.Data)
 		if err != nil {
-			return fmt.Errorf("error while reading object data: %w", err)
-		}
-		err = objectClient.PutObject(ctx, key, bytes.NewReader(data))
-		if err != nil {
-			return fmt.Errorf("error updloading block file: %w", err)
+			return fmt.Errorf("error uploading block file: %w", err)
 		}
 		block.BlockPath = key
 		results[idx] = block
@@ -288,13 +280,9 @@ func (b *BloomClient) downloadMeta(ctx context.Context, metaRef MetaRef, client 
 	if err != nil {
 		return Meta{}, fmt.Errorf("error downloading meta file %s : %w", metaRef.FilePath, err)
 	}
-	defer func() { _ = reader.Close() }()
+	defer reader.Close()
 
-	buf, err := io.ReadAll(reader)
-	if err != nil {
-		return Meta{}, fmt.Errorf("error reading meta file %s: %w", metaRef.FilePath, err)
-	}
-	err = json.Unmarshal(buf, &meta)
+	err = json.NewDecoder(reader).Decode(&meta)
 	if err != nil {
 		return Meta{}, fmt.Errorf("error unmarshalling content of meta file %s: %w", metaRef.FilePath, err)
 	}

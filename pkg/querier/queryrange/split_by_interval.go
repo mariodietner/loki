@@ -259,6 +259,7 @@ func splitByTime(req queryrangebase.Request, interval time.Duration) ([]queryran
 				Path:      r.Path,
 				StartTs:   start,
 				EndTs:     end,
+				Plan:      r.Plan,
 			})
 		})
 	case *LokiSeriesRequest:
@@ -310,13 +311,17 @@ func splitByTime(req queryrangebase.Request, interval time.Duration) ([]queryran
 	return reqs, nil
 }
 
-// maxRangeVectorAndOffsetDuration returns the maximum range vector and offset duration within a LogQL query.
-func maxRangeVectorAndOffsetDuration(q string) (time.Duration, time.Duration, error) {
-	expr, err := syntax.ParseExpr(q)
+// maxRangeVectorAndOffsetDurationFromQueryString
+func maxRangeVectorAndOffsetDurationFromQueryString(q string) (time.Duration, time.Duration, error) {
+	parsed, err := syntax.ParseExpr(q)
 	if err != nil {
 		return 0, 0, err
 	}
+	return maxRangeVectorAndOffsetDuration(parsed)
+}
 
+// maxRangeVectorAndOffsetDuration returns the maximum range vector and offset duration within a LogQL query.
+func maxRangeVectorAndOffsetDuration(expr syntax.Expr) (time.Duration, time.Duration, error) {
 	if _, ok := expr.(syntax.SampleExpr); !ok {
 		return 0, 0, nil
 	}
@@ -337,8 +342,8 @@ func maxRangeVectorAndOffsetDuration(q string) (time.Duration, time.Duration, er
 
 // reduceSplitIntervalForRangeVector reduces the split interval for a range query based on the duration of the range vector.
 // Large range vector durations will not be split into smaller intervals because it can cause the queries to be slow by over-processing data.
-func reduceSplitIntervalForRangeVector(r queryrangebase.Request, interval time.Duration) (time.Duration, error) {
-	maxRange, _, err := maxRangeVectorAndOffsetDuration(r.GetQuery())
+func reduceSplitIntervalForRangeVector(r *LokiRequest, interval time.Duration) (time.Duration, error) {
+	maxRange, _, err := maxRangeVectorAndOffsetDuration(r.Plan.AST)
 	if err != nil {
 		return 0, err
 	}
@@ -351,12 +356,12 @@ func reduceSplitIntervalForRangeVector(r queryrangebase.Request, interval time.D
 func splitMetricByTime(r queryrangebase.Request, interval time.Duration) ([]queryrangebase.Request, error) {
 	var reqs []queryrangebase.Request
 
-	interval, err := reduceSplitIntervalForRangeVector(r, interval)
+	lokiReq := r.(*LokiRequest)
+
+	interval, err := reduceSplitIntervalForRangeVector(lokiReq, interval)
 	if err != nil {
 		return nil, err
 	}
-
-	lokiReq := r.(*LokiRequest)
 
 	// step align start and end time of the query. Start time is rounded down and end time is rounded up.
 	stepNs := r.GetStep() * 1e6
@@ -383,6 +388,7 @@ func splitMetricByTime(r queryrangebase.Request, interval time.Duration) ([]quer
 				Path:      lokiReq.Path,
 				StartTs:   start,
 				EndTs:     end,
+				Plan:      lokiReq.Plan,
 			})
 		})
 
@@ -403,6 +409,7 @@ func splitMetricByTime(r queryrangebase.Request, interval time.Duration) ([]quer
 			Path:      lokiReq.Path,
 			StartTs:   start,
 			EndTs:     end,
+			Plan:      lokiReq.Plan,
 		})
 	}
 

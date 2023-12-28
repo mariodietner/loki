@@ -4,12 +4,12 @@ COPY . /src/loki
 WORKDIR /src/loki
 RUN make clean && make BUILD_IN_CONTAINER=false loki
 
-FROM alpine:3.18.3
+FROM alpine:3.18.4
 
 RUN apk add --no-cache ca-certificates libcap
 
 COPY --from=build /src/loki/cmd/loki/loki /usr/bin/loki
-COPY cmd/loki/loki-docker-config.yaml /etc/loki/local-config.yaml
+COPY loki-docker-config.yaml /etc/loki/local-config.yaml
 
 RUN addgroup -g 10001 -S loki && \
     adduser -u 10001 -S loki -G loki

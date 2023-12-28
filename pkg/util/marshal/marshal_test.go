@@ -177,7 +177,7 @@ var queryTestWithEncodingFlags = []struct {
 							"test": "test"
 						},
 						"values":[
-							[ "123456789012345", "super line"],
+							[ "123456789012345", "super line", {}],
 							[ "123456789012346", "super line with labels", {
 								"structuredMetadata": {
 									"foo": "a",
@@ -518,7 +518,7 @@ var tailTestWithEncodingFlags = []struct {
 						"test": "test"
 					},
 					"values":[
-						[ "123456789012345", "super line"],
+						[ "123456789012345", "super line", {}],
 						[ "123456789012346", "super line with labels", {
 							"structuredMetadata": {
 								"foo": "a",
@@ -692,16 +692,10 @@ func Test_WriteSeriesResponseJSON(t *testing.T) {
 			logproto.SeriesResponse{
 				Series: []logproto.SeriesIdentifier{
 					{
-						Labels: map[string]string{
-							"a": "1",
-							"b": "2",
-						},
+						Labels: logproto.MustNewSeriesEntries("a", "1", "b", "2"),
 					},
 					{
-						Labels: map[string]string{
-							"c": "3",
-							"d": "4",
-						},
+						Labels: logproto.MustNewSeriesEntries("c", "3", "d", "4"),
 					},
 				},
 			},
@@ -812,7 +806,7 @@ func Test_WriteQueryResponseJSON_EncodeFlags(t *testing.T) {
 								"test": "test"
 							},
 							"values":[
-								[ "123456789012346", "super line"]
+								[ "123456789012346", "super line", {}]
 							]
 						},
 						{
@@ -965,7 +959,7 @@ func Test_EncodeResult_And_ResultValue_Parity(t *testing.T) {
 	f := func(w wrappedValue) bool {
 		var buf bytes.Buffer
 		js := json.NewStream(json.ConfigFastest, &buf, 0)
-		err := encodeResult(w.Value, js, httpreq.NewEncodingFlags(httpreq.FlagCategorizeLabels))
+		err := encodeResult(w.Value, js, nil)
 		require.NoError(t, err)
 		js.Flush()
 		actual := buf.String()

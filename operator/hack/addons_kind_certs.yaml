@@ -377,3 +377,53 @@ spec:
   issuerRef:
     name: kind-issuer
     kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lokistack-dev-ruler-grpc
+  namespace: default
+spec:
+  secretName: lokistack-dev-ruler-grpc
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+  commonName: lokistack-dev-ruler-grpc.default.svc
+  privateKey:
+    rotationPolicy: Never
+    algorithm: ECDSA
+    encoding: PKCS8
+    size: 256
+  usages:
+    - client auth
+    - server auth
+  dnsNames:
+  - "lokistack-dev-ruler-grpc.default.svc"
+  - "lokistack-dev-ruler-grpc.default.svc.cluster.local"
+  issuerRef:
+    name: kind-issuer
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: lokistack-dev-ruler-http
+  namespace: default
+spec:
+  secretName: lokistack-dev-ruler-http
+  duration: 2160h # 90d
+  renewBefore: 360h # 15d
+  commonName: lokistack-dev-ruler-http.default.svc
+  privateKey:
+    rotationPolicy: Never
+    algorithm: ECDSA
+    encoding: PKCS8
+    size: 256
+  usages:
+    - client auth
+    - server auth
+  dnsNames:
+  - "lokistack-dev-ruler-http.default.svc"
+  - "lokistack-dev-ruler-http.default.svc.cluster.local"
+  issuerRef:
+    name: kind-issuer
+    kind: Issuer

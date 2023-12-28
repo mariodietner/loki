@@ -1,0 +1,1 @@
+kubectl create secret generic lokistack-dev-minio --from-literal=bucketnames="loki" --from-literal=endpoint="http://minio.stasid-storage.svc.cluster.local:80"  --from-literal=access_key_id="fd2IEsf9LFRKxzLvdBPy" --from-literal=access_key_secret="CIVXmy7MwzbLFwEveM5mzLThkgOHm7IZv5RSKt9i" --from-literal=region="eu-central-1"

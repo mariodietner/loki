@@ -3,6 +3,11 @@ kind: LokiStack
 metadata:
   name: lokistack-dev
 spec:
+  rules:
+    enabled: true
+    selector:
+      matchLabels: 
+        app.kubernetes.io/name: loki-alerts
   size: 1x.demo
   storage:
     schemas:
@@ -11,4 +16,4 @@ spec:
     secret:
       name: test
       type: s3
-  storageClassName: standard
+  storageClassName: default

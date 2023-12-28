@@ -61,6 +61,8 @@ const (
 	StatsResultCache            = "stats-result"
 	VolumeResultCache           = "volume-result"
 	WriteDedupeCache            = "write-dedupe"
+	BloomFilterCache            = "bloom-filter"
+	BloomBlocksCache            = "bloom-blocks"
 )
 
 // NewContext creates a new statistics context

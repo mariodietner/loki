@@ -1,6 +1,7 @@
 package log
 
 import (
+	"context"
 	"sort"
 	"strconv"
 	"time"
@@ -36,6 +37,12 @@ type StreamSampleExtractor interface {
 	BaseLabels() LabelsResult
 	Process(ts int64, line []byte, structuredMetadata ...labels.Label) (float64, LabelsResult, bool)
 	ProcessString(ts int64, line string, structuredMetadata ...labels.Label) (float64, LabelsResult, bool)
+}
+
+// SampleExtractorWrapper takes an extractor, wraps it is some desired functionality
+// and returns a new pipeline
+type SampleExtractorWrapper interface {
+	Wrap(ctx context.Context, extractor SampleExtractor, query, tenant string) SampleExtractor
 }
 
 type lineSampleExtractor struct {
