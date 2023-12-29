@@ -16,7 +16,7 @@ RUN addgroup -g 10001 -S loki && \
 RUN mkdir -p /loki/rules && \
     mkdir -p /loki/rules-temp && \
     chown -R loki:loki /etc/loki /loki
-	chown -R loki:loki /tmp/
+RUN chown -R loki:loki /tmp/
 
 USER 10001
 EXPOSE 3100
