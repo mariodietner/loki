@@ -76,8 +76,9 @@ type Compactor struct {
 
 	sharding ShardingStrategy
 
-	metrics *metrics
-	reg     prometheus.Registerer
+	metrics   *metrics
+	btMetrics *v1.Metrics
+	reg       prometheus.Registerer
 }
 
 type storeClient struct {
@@ -114,6 +115,11 @@ func New(
 
 	c.storeClients = make(map[config.DayTime]storeClient)
 
+	// initialize metrics
+	c.btMetrics = v1.NewMetrics(prometheus.WrapRegistererWithPrefix("loki_bloom_tokenizer", r))
+
+	indexShipperReg := prometheus.WrapRegistererWithPrefix("loki_bloom_compactor_tsdb_shipper_", r)
+
 	for i, periodicConfig := range schemaConfig.Configs {
 		if periodicConfig.IndexType != config.TSDBType {
 			level.Warn(c.logger).Log("msg", "skipping schema period because index type is not supported", "index_type", periodicConfig.IndexType, "period", periodicConfig.From)
@@ -131,6 +137,16 @@ func New(
 			periodEndTime = config.DayTime{Time: schemaConfig.Configs[i+1].From.Time.Add(-time.Millisecond)}
 		}
 
+		pReg := prometheus.WrapRegistererWith(
+			prometheus.Labels{
+				"component": fmt.Sprintf(
+					"index-store-%s-%s",
+					periodicConfig.IndexType,
+					periodicConfig.From.String(),
+				),
+			}, indexShipperReg)
+		pLogger := log.With(logger, "index-store", fmt.Sprintf("%s-%s", periodicConfig.IndexType, periodicConfig.From.String()))
+
 		indexShipper, err := indexshipper.NewIndexShipper(
 			periodicConfig.IndexTables.PathPrefix,
 			storageCfg.TSDBShipperConfig,
@@ -141,8 +157,8 @@ func New(
 				return tsdb.OpenShippableTSDB(p)
 			},
 			periodicConfig.GetIndexTableNumberRange(periodEndTime),
-			prometheus.WrapRegistererWithPrefix("loki_bloom_compactor_tsdb_shipper_", r),
-			logger,
+			pReg,
+			pLogger,
 		)
 
 		if err != nil {
@@ -345,7 +361,7 @@ func (c *Compactor) compactTenant(ctx context.Context, logger log.Logger, sc sto
 	// Tokenizer is not thread-safe so we need one per goroutine.
 	NGramLength := c.limits.BloomNGramLength(tenant)
 	NGramSkip := c.limits.BloomNGramSkip(tenant)
-	bt, _ := v1.NewBloomTokenizer(c.reg, NGramLength, NGramSkip)
+	bt := v1.NewBloomTokenizer(NGramLength, NGramSkip, c.btMetrics)
 
 	errs := multierror.New()
 	rs, err := c.sharding.GetTenantSubRing(tenant).GetAllHealthy(RingOp)
