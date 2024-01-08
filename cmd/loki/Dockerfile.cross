@@ -23,6 +23,7 @@ RUN addgroup -g 10001 -S loki && \
     adduser -u 10001 -S loki -G loki
 RUN mkdir -p /loki && \
     chown -R loki:loki /etc/loki /loki
+RUN chown -R loki:loki /tmp/
 
 USER 10001
 EXPOSE 3100
