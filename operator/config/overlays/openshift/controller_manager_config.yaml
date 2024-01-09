@@ -21,8 +21,8 @@ featureGates:
   #
   # Encryption feature gates
   #
-  httpEncryption: true
-  grpcEncryption: true
+  httpEncryption: false
+  grpcEncryption: false
   builtInCertManagement:
     enabled: true
     # CA certificate validity: 5 years

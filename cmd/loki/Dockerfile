@@ -9,7 +9,7 @@ FROM alpine:3.18.4
 RUN apk add --no-cache ca-certificates libcap
 
 COPY --from=build /src/loki/cmd/loki/loki /usr/bin/loki
-COPY loki-docker-config.yaml /etc/loki/local-config.yaml
+COPY cmd/loki/loki-docker-config.yaml /etc/loki/local-config.yaml
 
 RUN addgroup -g 10001 -S loki && \
     adduser -u 10001 -S loki -G loki

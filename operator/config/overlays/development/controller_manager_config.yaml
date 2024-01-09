@@ -13,8 +13,8 @@ featureGates:
   #
   # Encryption feature gates
   #
-  httpEncryption: true
-  grpcEncryption: true
+  httpEncryption: false
+  grpcEncryption: false
   #
   # Component feature gates
   #
