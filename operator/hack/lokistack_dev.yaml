@@ -8,9 +8,6 @@ spec:
     selector:
       matchLabels: 
         app.kubernetes.io/name: loki-alerts
-  alertmanager:
-    Endpoints:
-      - http://promgraf-kube-prometheus-s-alertmanager.monitoring:9093
   size: 1x.demo
   storage:
     schemas:
