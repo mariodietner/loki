@@ -1,44 +1,3 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: standard
-  resourceVersion: '442'
-  creationTimestamp: '2022-08-30T15:26:11Z'
-  labels:
-    addonmanager.kubernetes.io/mode: EnsureExists
-    kubernetes.io/cluster-service: 'true'
-  annotations:
-    storageclass.kubernetes.io/is-default-class: 'true'
-  managedFields:
-    - manager: kubectl-create
-      operation: Update
-      apiVersion: storage.k8s.io/v1
-      time: '2022-08-30T15:26:11Z'
-      fieldsType: FieldsV1
-      fieldsV1:
-        f:allowVolumeExpansion: {}
-        f:metadata:
-          f:annotations:
-            .: {}
-            f:storageclass.kubernetes.io/is-default-class: {}
-          f:labels:
-            .: {}
-            f:addonmanager.kubernetes.io/mode: {}
-            f:kubernetes.io/cluster-service: {}
-        f:parameters:
-          .: {}
-          f:skuname: {}
-        f:provisioner: {}
-        f:reclaimPolicy: {}
-        f:volumeBindingMode: {}
-  selfLink: /apis/storage.k8s.io/v1/storageclasses/default
-provisioner: disk.csi.azure.com
-parameters:
-  skuname: StandardSSD_LRS
-reclaimPolicy: Delete
-allowVolumeExpansion: true
-volumeBindingMode: WaitForFirstConsumer
----
 apiVersion: loki.grafana.com/v1
 kind: LokiStack
 metadata:
@@ -49,6 +8,9 @@ spec:
     selector:
       matchLabels: 
         app.kubernetes.io/name: loki-alerts
+  alertmanager:
+    Endpoints:
+      - http://promgraf-kube-prometheus-s-alertmanager.monitoring:9093
   size: 1x.demo
   storage:
     schemas:
