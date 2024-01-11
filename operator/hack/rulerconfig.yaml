@@ -1,0 +1,8 @@
+apiVersion: loki.grafana.com/v1
+kind: RulerConfig
+metadata:
+  name: rulerconfig-dev
+spec:
+  alertmanager:
+    endpoints:
+      - http://promgraf-kube-prometheus-s-alertmanager.monitoring:9093
