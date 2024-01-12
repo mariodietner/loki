@@ -139,6 +139,9 @@ type LokiStackReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.7.0/pkg/reconcile
 func (r *LokiStackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	r.Log.Info("Reconciliation for Request: ", "name", req.NamespacedName)
+
 	ok, err := state.IsManaged(ctx, req, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err

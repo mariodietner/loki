@@ -8,6 +8,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/go-logr/logr"
 	lokiv1 "github.com/grafana/loki/operator/apis/loki/v1"
 	"github.com/grafana/loki/operator/controllers/loki/internal/lokistack"
 )
@@ -16,6 +17,7 @@ import (
 type RulerConfigReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Log    logr.Logger
 }
 
 //+kubebuilder:rbac:groups=loki.grafana.com,resources=rulerconfigs,verbs=get;list;watch;create;update;patch;delete
@@ -28,6 +30,9 @@ type RulerConfigReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+
+	r.Log.Info("Reconciliation for Request: ", "name", req.NamespacedName)
+
 	var rc lokiv1.RulerConfig
 	key := client.ObjectKey{Name: req.Name, Namespace: req.Namespace}
 	if err := r.Get(ctx, key, &rc); err != nil {
