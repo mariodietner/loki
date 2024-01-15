@@ -31,12 +31,16 @@ type RulerConfigReconciler struct {
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.11.0/pkg/reconcile
 func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 
-	r.Log.Info("Reconciliation for Request: ", "name", req.NamespacedName)
+	r.Log.Info("Reconciliation for Request: ", "Name", req.Name, "Namespace", req.Namespace)
 
 	var rc lokiv1.RulerConfig
 	key := client.ObjectKey{Name: req.Name, Namespace: req.Namespace}
 	if err := r.Get(ctx, key, &rc); err != nil {
+
 		if errors.IsNotFound(err) {
+
+			r.Log.Info("")
+
 			// RulerConfig not found, remove annotation from LokiStack.
 			err = lokistack.RemoveRulerConfigAnnotation(ctx, r.Client, req.Name, req.Namespace)
 			if err != nil {
