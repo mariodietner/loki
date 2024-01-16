@@ -63,6 +63,9 @@ func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *RulerConfigReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	r.Log.Info("SetupWithManager started with ruler config for ", "config-object", &lokiv1.RulerConfig{})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&lokiv1.RulerConfig{}).
 		Complete(r)
