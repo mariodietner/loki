@@ -191,6 +191,9 @@ func (r *LokiStackReconciler) updateResources(ctx context.Context, req ctrl.Requ
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *LokiStackReconciler) SetupWithManager(mgr manager.Manager) error {
+
+	r.Log.Info("SetupWithManager started with loki stack config. ruler config is: ", "config-object", &lokiv1.RulerConfig{})
+
 	b := ctrl.NewControllerManagedBy(mgr)
 	return r.buildController(k8s.NewCtrlBuilder(b))
 }
