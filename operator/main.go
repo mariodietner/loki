@@ -133,6 +133,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
 	if err = (&lokictrl.AlertingRuleReconciler{
 		Client: mgr.GetClient(),
 		Log:    logger.WithName("controllers").WithName("alertingrule"),
@@ -141,6 +142,7 @@ func main() {
 		logger.Error(err, "unable to create controller", "controller", "alertingrule")
 		os.Exit(1)
 	}
+
 	if ctrlCfg.Gates.AlertingRuleWebhook {
 		v := &validation.AlertingRuleValidator{}
 		if ctrlCfg.Gates.OpenShift.ExtendedRuleValidation {
@@ -152,6 +154,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
 	if err = (&lokictrl.RecordingRuleReconciler{
 		Client: mgr.GetClient(),
 		Log:    logger.WithName("controllers").WithName("recordingrule"),
@@ -160,6 +163,7 @@ func main() {
 		logger.Error(err, "unable to create controller", "controller", "recordingrule")
 		os.Exit(1)
 	}
+
 	if ctrlCfg.Gates.RecordingRuleWebhook {
 		v := &validation.RecordingRuleValidator{}
 		if ctrlCfg.Gates.OpenShift.ExtendedRuleValidation {
@@ -171,6 +175,9 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	logger.Info("Manager is configuring SetupWithManager for RulerConfig")
+
 	if err = (&lokictrl.RulerConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
