@@ -181,6 +181,7 @@ func main() {
 	if err = (&lokictrl.RulerConfigReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Log:    logger,
 	}).SetupWithManager(mgr); err != nil {
 		logger.Error(err, "unable to create controller", "controller", "rulerconfig")
 		os.Exit(1)
