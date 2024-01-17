@@ -8,6 +8,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/ViaQ/logerr/v2/log"
 	lokiv1 "github.com/grafana/loki/operator/apis/loki/v1"
 	"github.com/grafana/loki/operator/internal/external/k8s"
 )
@@ -16,18 +17,30 @@ const (
 	annotationRulerConfigDiscoveredAt = "loki.grafana.com/rulerConfigDiscoveredAt"
 )
 
+var (
+	logger = log.NewLogger("loki-operator").WithName("ruler-config-discovery").WithName("lokistack")
+)
+
 // AnnotateForRulerConfig adds/updates the `loki.grafana.com/rulerConfigDiscoveredAt` annotation
 // to the named Lokistack in the same namespace of the RulerConfig. If no LokiStack is found, then
 // skip reconciliation.
 func AnnotateForRulerConfig(ctx context.Context, k k8s.Client, name, namespace string) error {
+
+	logger.Info("AnnotateForRulerConfig with params", "name", name, "namespace", namespace)
+
 	key := client.ObjectKey{Name: name, Namespace: namespace}
 	ss, err := getLokiStack(ctx, k, key)
 	if ss == nil || err != nil {
+		logger.Info("AnnotateForRulerConfig error for key", "name", name, "namespace", namespace, "key", key, "error", err)
 		return err
 	}
 
 	timeStamp := time.Now().UTC().Format(time.RFC3339)
+
+	logger.Info("AnnotateForRulerConfig setting timestamp", "name", name, "namespace", namespace, "timeStamp", timeStamp, "key", key)
+
 	if err := updateAnnotation(ctx, k, ss, annotationRulerConfigDiscoveredAt, timeStamp); err != nil {
+		logger.Info("AnnotateForRulerConfig setting timestamp failed to update lokistack `rulerConfigDiscoveredAt` annotation", "name", name, "namespace", namespace, "timeStamp", timeStamp, "key", key)
 		return kverrors.Wrap(err, "failed to update lokistack `rulerConfigDiscoveredAt` annotation", "key", key)
 	}
 
