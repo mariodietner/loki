@@ -37,9 +37,11 @@ func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	key := client.ObjectKey{Name: req.Name, Namespace: req.Namespace}
 	if err := r.Get(ctx, key, &rc); err != nil {
 
+		r.Log.Info("Reconciliation error getting resource with key: ", "Name", req.Name, "Namespace", req.Namespace, "key", key)
+
 		if errors.IsNotFound(err) {
 
-			r.Log.Info("")
+			r.Log.Info("Reconciliation error getting ObjectKey object not found", "error", err, "key", key)
 
 			// RulerConfig not found, remove annotation from LokiStack.
 			err = lokistack.RemoveRulerConfigAnnotation(ctx, r.Client, req.Name, req.Namespace)
@@ -52,6 +54,8 @@ func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 		return ctrl.Result{}, err
 	}
+
+	r.Log.Info("Reconciliation Annotating: ", "Name", req.Name, "Namespace", req.Namespace)
 
 	err := lokistack.AnnotateForRulerConfig(ctx, r.Client, req.Name, req.Namespace)
 	if err != nil {
