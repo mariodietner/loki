@@ -59,6 +59,9 @@ func (r *RulerConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	err := lokistack.AnnotateForRulerConfig(ctx, r.Client, req.Name, req.Namespace)
 	if err != nil {
+
+		r.Log.Info("Reconciliation Annotating error: ", "Name", req.Name, "Namespace", req.Namespace, "error", err)
+
 		return ctrl.Result{}, err
 	}
 
