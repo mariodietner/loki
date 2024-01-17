@@ -68,13 +68,21 @@ func getLokiStack(ctx context.Context, k k8s.Client, key client.ObjectKey) (*lok
 	var s lokiv1.LokiStack
 
 	if err := k.Get(ctx, key, &s); err != nil {
+
+		logger.Info("getLokiStack error", "key", key, "error", err)
+
 		if apierrors.IsNotFound(err) {
+
+			logger.Info("getLokiStack error stack not found", "key", key, "error", err)
+
 			// Do nothing
 			return nil, nil
 		}
 
 		return nil, kverrors.Wrap(err, "failed to get lokistack", "key", key)
 	}
+
+	logger.Info("getLokiStack found. returning deep copy", "key", key)
 
 	return s.DeepCopy(), nil
 }
