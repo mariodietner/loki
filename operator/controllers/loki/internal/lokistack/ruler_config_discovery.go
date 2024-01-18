@@ -64,8 +64,8 @@ func RemoveRulerConfigAnnotation(ctx context.Context, k k8s.Client, name, namesp
 	return nil
 }
 
-func getLokiStack(ctx context.Context, k k8s.Client, key client.ObjectKey) (*lokiv1.RulerConfig, error) {
-	var s lokiv1.RulerConfig
+func getLokiStack(ctx context.Context, k k8s.Client, key client.ObjectKey) (*lokiv1.LokiStack, error) {
+	var s lokiv1.LokiStack
 
 	if err := k.Get(ctx, key, &s); err != nil {
 

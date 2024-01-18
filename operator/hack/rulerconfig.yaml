@@ -1,7 +1,7 @@
 apiVersion: loki.grafana.com/v1
 kind: RulerConfig
 metadata:
-  name: rulerconfig-dev
+  name: lokistack-dev
 spec:
   alertmanager:
     endpoints:
